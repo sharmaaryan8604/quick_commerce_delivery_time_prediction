@@ -1,6 +1,7 @@
-# ==================================================
-# QUICK COMMERCE DELIVERY TIME WEB APP
-# ==================================================
+# ==========================================================
+# QUICK COMMERCE DELIVERY TIME PREDICTION WEB APP
+# Using XGBoost + Label Encoding
+# ==========================================================
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse
@@ -9,27 +10,39 @@ import pandas as pd
 import joblib
 import uvicorn
 
-app = FastAPI()
+# ----------------------------------------------------------
+# Initialize FastAPI
+# ----------------------------------------------------------
 
-# Load model and columns
+app = FastAPI(title="Quick Commerce Delivery Time Prediction")
+
+# ----------------------------------------------------------
+# Load Trained Model and Encoders
+# ----------------------------------------------------------
+
 model = joblib.load("xgb_model.pkl")
+label_encoders = joblib.load("label_encoders.pkl")
 model_columns = joblib.load("model_columns.pkl")
 
-# Setup templates folder
+# ----------------------------------------------------------
+# Setup Templates Folder
+# ----------------------------------------------------------
+
 templates = Jinja2Templates(directory="templates")
 
+# ==========================================================
+# HOME ROUTE
+# ==========================================================
 
-# ==============================
-# HOME PAGE
-# ==============================
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
 
 
-# ==============================
+# ==========================================================
 # PREDICTION ROUTE
-# ==============================
+# ==========================================================
+
 @app.post("/predict", response_class=HTMLResponse)
 async def predict(
     request: Request,
@@ -46,7 +59,10 @@ async def predict(
     delivery_partner_rating: float = Form(...)
 ):
 
-    # Convert input to dataframe
+    # ------------------------------------------------------
+    # Create input dictionary
+    # ------------------------------------------------------
+
     input_dict = {
         "company": company,
         "city": city,
@@ -61,33 +77,51 @@ async def predict(
         "delivery_partner_rating": delivery_partner_rating
     }
 
+    # Convert to DataFrame
     input_df = pd.DataFrame([input_dict])
 
-    # Apply same encoding as training
-    input_df = pd.get_dummies(input_df)
+    # ------------------------------------------------------
+    # Apply Label Encoding
+    # ------------------------------------------------------
 
-    # Match training columns
-    input_df = input_df.reindex(columns=model_columns, fill_value=0)
+    for col, le in label_encoders.items():
+        if col in input_df.columns:
+            input_df[col] = le.transform(input_df[col])
 
-    prediction = model.predict(input_df)
+    # Ensure column order matches training
+    input_df = input_df[model_columns]
+
+    # ------------------------------------------------------
+    # Make Prediction
+    # ------------------------------------------------------
+
+    prediction = model.predict(input_df)[0]
+
+    # ------------------------------------------------------
+    # Return Result to Dashboard
+    # ------------------------------------------------------
 
     return templates.TemplateResponse(
         "dashboard.html",
         {
             "request": request,
-            "prediction": round(float(prediction[0]), 2)
+            "prediction": round(float(prediction), 2)
         }
     )
 
 
-# ==============================
-# HEALTH CHECK
-# ==============================
+# ==========================================================
+# HEALTH CHECK ROUTE
+# ==========================================================
+
 @app.get("/health")
 def health():
     return {"status": "Model Running Successfully"}
 
 
-# For local run
+# ==========================================================
+# Run Locally (Optional)
+# ==========================================================
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
