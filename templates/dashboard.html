@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Quick Commerce AI Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: 'Segoe UI';
+            background: linear-gradient(135deg,#1e3c72,#2a5298);
+            color: white;
+            margin:0;
+            padding:20px;
+            animation: fadeIn 1s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from {opacity:0;}
+            to {opacity:1;}
+        }
+
+        .card {
+            background: rgba(255,255,255,0.1);
+            padding:20px;
+            border-radius:15px;
+            margin:20px 0;
+            backdrop-filter: blur(10px);
+        }
+
+        input {
+            width:100%;
+            padding:8px;
+            margin:5px 0;
+            border-radius:5px;
+            border:none;
+        }
+
+        button {
+            background:#00c6ff;
+            border:none;
+            padding:10px;
+            width:100%;
+            color:white;
+            font-weight:bold;
+            border-radius:5px;
+            cursor:pointer;
+        }
+
+        h1, h2 {
+            text-align:center;
+        }
+    </style>
+</head>
+
+<body>
+
+<h1>🚀 Quick Commerce Delivery AI</h1>
+
+<div class="card">
+<h2>Predict Delivery Time</h2>
+
+<form action="/predict" method="post">
+    <input name="company" placeholder="Company" required>
+    <input name="city" placeholder="City" required>
+    <input name="customer_age" type="number" placeholder="Customer Age" required>
+    <input name="order_value" type="number" step="0.1" placeholder="Order Value" required>
+    <input name="distance_km" type="number" step="0.1" placeholder="Distance (km)" required>
+    <input name="items_count" type="number" placeholder="Items Count" required>
+    <input name="product_category" placeholder="Product Category" required>
+    <input name="payment_method" placeholder="Payment Method" required>
+    <input name="customer_rating" type="number" step="0.1" placeholder="Customer Rating" required>
+    <input name="discount_applied" type="number" placeholder="Discount (0/1)" required>
+    <input name="delivery_partner_rating" type="number" step="0.1" placeholder="Delivery Partner Rating" required>
+
+    <button type="submit">Predict</button>
+</form>
+
+{% if prediction %}
+<h2>⏱ Predicted Delivery Time: {{ prediction }} minutes</h2>
+{% endif %}
+
+</div>
+
+<div class="card">
+<h2>📊 Sample Model Comparison (Demo)</h2>
+<canvas id="comparisonChart"></canvas>
+</div>
+
+<script>
+var ctx = document.getElementById('comparisonChart').getContext('2d');
+
+new Chart(ctx, {
+    type: 'bar',
+    data: {
+        labels: ['Linear Regression','Random Forest','XGBoost'],
+        datasets: [{
+            label: 'RMSE',
+            data: [25, 18, 16],
+            backgroundColor: ['#ff6384','#36a2eb','#4bc0c0']
+        }]
+    }
+});
+</script>
+
+</body>
+</html>
