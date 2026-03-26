@@ -177,7 +177,7 @@ export default function DeliveryPredictor() {
     };
 
     try {
-      const res  = await fetch("/api/predict", {
+      const res  = await fetch("https://quick-commerce-delivery-time-prediction-4.onrender.com/api/predict", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
