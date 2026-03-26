@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -104,7 +104,6 @@ const styleEl = document.createElement("style");
 styleEl.textContent = css;
 document.head.appendChild(styleEl);
 
-// ── Real values from dataset ──────────────────────────────────────────────────
 const COMPANIES = ["Swiggy Instamart","Blinkit","Zepto","Flipkart Minutes","Jio Mart","Dunzo","Big Basket","Amazon Now"];
 const CITIES    = ["Delhi","Mumbai","Bengaluru","Hyderabad","Chennai","Kolkata","Noida","Pune","Amritsar","Jaipur","Haridwar"];
 const PRODUCTS  = ["Dairy","Snacks","Beverages","Groceries","Household","Personal Care","Fruits & Vegetables"];
@@ -124,7 +123,9 @@ function validate(f) {
 
 export default function DeliveryPredictor() {
   const now = new Date();
-  const [form, setForm] = useState({
+
+  // Use refs for form values to avoid re-renders while typing
+  const formRef = useRef({
     order_value:      "",
     distance_km:      "",
     items_count:      "",
@@ -143,33 +144,62 @@ export default function DeliveryPredictor() {
   const [result,  setResult]  = useState(null);
   const [apiErr,  setApiErr]  = useState("");
 
-  const set = (k, v) => {
-    setForm(f => ({ ...f, [k]: v }));
-    setErrors(e => { const n={...e}; delete n[k]; return n; });
-    setResult(null); setApiErr("");
-  };
+  // For selects and fields that need to trigger re-renders (dropdowns),
+  // we still keep a parallel display state only for controlled selects
+  const [selects, setSelects] = useState({
+    company: "", city: "", product_cat: "", payment_method: ""
+  });
+
+  // Text/number inputs: update ref only — no re-render, no focus loss
+  const handleInputChange = useCallback((id, value) => {
+    formRef.current[id] = value;
+    // Clear error for this field without full re-render if possible
+    setErrors(e => {
+      if (!e[id]) return e; // no change needed
+      const n = { ...e };
+      delete n[id];
+      return n;
+    });
+    setResult(null);
+    setApiErr("");
+  }, []);
+
+  // Select inputs still need controlled state for display
+  const handleSelectChange = useCallback((id, value) => {
+    formRef.current[id] = value;
+    setSelects(s => ({ ...s, [id]: value }));
+    setErrors(e => {
+      if (!e[id]) return e;
+      const n = { ...e };
+      delete n[id];
+      return n;
+    });
+    setResult(null);
+    setApiErr("");
+  }, []);
 
   const handleSubmit = async () => {
-    const errs = validate(form);
+    const f = formRef.current;
+    const errs = validate(f);
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setLoading(true); setApiErr("");
 
-    const hour        = +form.order_hour;
+    const hour        = +f.order_hour;
     const is_peak     = [8,9,12,13,18,19,20].includes(hour) ? 1 : 0;
     const is_weekend  = [0,6].includes(now.getDay()) ? 1 : 0;
-    const dist_per_item = +form.distance_km / (+form.items_count + 1);
+    const dist_per_item = +f.distance_km / (+f.items_count + 1);
 
     const payload = {
-      order_value:       +form.order_value,
-      distance_km:       +form.distance_km,
-      items_count:       +form.items_count,
-      discount_amount:   +form.discount_amount,
-      customer_rating:   +form.customer_rating,
-      partner_rating:    +form.partner_rating,
-      company:           form.company,
-      city:              form.city,
-      product_category:  form.product_cat,
-      payment_method:    form.payment_method,
+      order_value:       +f.order_value,
+      distance_km:       +f.distance_km,
+      items_count:       +f.items_count,
+      discount_amount:   +f.discount_amount,
+      customer_rating:   +f.customer_rating,
+      partner_rating:    +f.partner_rating,
+      company:           f.company,
+      city:              f.city,
+      product_category:  f.product_cat,
+      payment_method:    f.payment_method,
       hour_of_day:       hour,
       is_peak_hour:      is_peak,
       is_weekend:        is_weekend,
@@ -177,43 +207,66 @@ export default function DeliveryPredictor() {
     };
 
     try {
-      const res  = await fetch("https://quick-commerce-delivery-time-prediction-4.onrender.com/api/predict", {
+      const res = await fetch("https://quick-commerce-delivery-time-prediction-4.onrender.com/api/predict", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setResult({ predicted: data.predicted_minutes, lower: data.lower_bound, upper: data.upper_bound, confidence: data.confidence ?? 91, payload });
+      setResult({ predicted: data.predicted_minutes, lower: data.lower_bound, upper: data.upper_bound, confidence: data.confidence ?? 91, payload, f: { ...f } });
     } catch {
-      // Demo mock — remove in production
       const base = Math.round(
-        6 + +form.distance_km * 3.1 + +form.items_count * 0.35
+        6 + +f.distance_km * 3.1 + +f.items_count * 0.35
         + (is_peak ? 4 : 0)
-        + (form.company === "Zepto" ? -2 : form.company === "Dunzo" ? 2 : 0)
-        + (form.city === "Delhi" || form.city === "Mumbai" ? 2 : 0)
-        - (+form.partner_rating * 0.8)
-        - (+form.discount_amount * 0.005)
+        + (f.company === "Zepto" ? -2 : f.company === "Dunzo" ? 2 : 0)
+        + (f.city === "Delhi" || f.city === "Mumbai" ? 2 : 0)
+        - (+f.partner_rating * 0.8)
+        - (+f.discount_amount * 0.005)
       );
-      const std = Math.max(2, Math.round(2.8 + +form.distance_km * 0.25));
-      setResult({ predicted: Math.max(5,base), lower: Math.max(3,base-std), upper: base+std, confidence: 91, payload });
+      const std = Math.max(2, Math.round(2.8 + +f.distance_km * 0.25));
+      setResult({ predicted: Math.max(5,base), lower: Math.max(3,base-std), upper: base+std, confidence: 91, payload, f: { ...f } });
     } finally { setLoading(false); }
   };
 
-  const Field = ({ id, label, children, span }) => (
-    <div className={`field${span?" s2":""}`}>
+  const Field = ({ children, span }) => (
+    <div className={span ? "field s2" : "field"}>{children}</div>
+  );
+
+  const Sel = ({ id, label, err }) => (
+    <div className="field">
       <label>{label}</label>
-      {children}
+      <div className="sel">
+        <select
+          value={selects[id]}
+          className={err ? "err" : ""}
+          onChange={e => handleSelectChange(id, e.target.value)}
+        >
+          <option value="">Select…</option>
+          {id === "company"        && COMPANIES.map(c => <option key={c} value={c}>{c}</option>)}
+          {id === "city"           && CITIES.map(c    => <option key={c} value={c}>{c}</option>)}
+          {id === "product_cat"    && PRODUCTS.map(p  => <option key={p} value={p}>{p}</option>)}
+          {id === "payment_method" && PAYMENTS.map(p  => <option key={p} value={p}>{p}</option>)}
+        </select>
+      </div>
     </div>
   );
 
-  const Sel = ({ id, val, err, children }) => (
-    <div className="sel">
-      <select value={val} className={err?"err":""} onChange={e=>set(id,e.target.value)}>
-        <option value="">Select…</option>
-        {children}
-      </select>
-    </div>
+  // Uncontrolled number input — uses defaultValue + onChange ref update
+  const NumInput = ({ id, label, placeholder, min = "0", max, step = "1", span, defaultVal }) => (
+    <Field span={span}>
+      <label>{label}</label>
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder={placeholder}
+        defaultValue={defaultVal ?? formRef.current[id]}
+        className={errors[id] ? "err" : ""}
+        onChange={e => handleInputChange(id, e.target.value)}
+      />
+    </Field>
   );
+
+  const rf = result?.f || {};
 
   return (
     <div className="app">
@@ -223,74 +276,27 @@ export default function DeliveryPredictor() {
 
       <div className="card">
 
-        {/* ── Order info ── */}
         <div className="section-label">Order details</div>
         <div className="grid2">
-          <Field id="order_value" label="Order value (₹)">
-            <input type="number" min="0" placeholder="e.g. 702"
-              value={form.order_value} className={errors.order_value?"err":""}
-              onChange={e=>set("order_value",e.target.value)}/>
-          </Field>
-          <Field id="items_count" label="Item count">
-            <input type="number" min="1" placeholder="e.g. 12"
-              value={form.items_count} className={errors.items_count?"err":""}
-              onChange={e=>set("items_count",e.target.value)}/>
-          </Field>
-          <Field id="discount_amount" label="Discount amount (₹)">
-            <input type="number" min="0" placeholder="0"
-              value={form.discount_amount}
-              onChange={e=>set("discount_amount",e.target.value)}/>
-          </Field>
-          <Field id="payment_method" label="Payment method">
-            <Sel id="payment_method" val={form.payment_method} err={errors.payment_method}>
-              {PAYMENTS.map(p=><option key={p} value={p}>{p}</option>)}
-            </Sel>
-          </Field>
+          <NumInput id="order_value"     label="Order value (₹)"     placeholder="e.g. 702" min="1" />
+          <NumInput id="items_count"     label="Item count"           placeholder="e.g. 12"  min="1" />
+          <NumInput id="discount_amount" label="Discount amount (₹)"  placeholder="0"        defaultVal="0" />
+          <Sel      id="payment_method"  label="Payment method"       err={errors.payment_method} />
         </div>
 
-        {/* ── Platform & location ── */}
         <div className="section-label" style={{marginTop:20}}>Platform & location</div>
         <div className="grid2">
-          <Field id="company" label="Company">
-            <Sel id="company" val={form.company} err={errors.company}>
-              {COMPANIES.map(c=><option key={c} value={c}>{c}</option>)}
-            </Sel>
-          </Field>
-          <Field id="city" label="City">
-            <Sel id="city" val={form.city} err={errors.city}>
-              {CITIES.map(c=><option key={c} value={c}>{c}</option>)}
-            </Sel>
-          </Field>
-          <Field id="product_cat" label="Product category">
-            <Sel id="product_cat" val={form.product_cat} err={errors.product_cat}>
-              {PRODUCTS.map(p=><option key={p} value={p}>{p}</option>)}
-            </Sel>
-          </Field>
-          <Field id="distance_km" label="Distance (km)">
-            <input type="number" min="0" step="0.1" placeholder="e.g. 4.7"
-              value={form.distance_km} className={errors.distance_km?"err":""}
-              onChange={e=>set("distance_km",e.target.value)}/>
-          </Field>
+          <Sel id="company"     label="Company"          err={errors.company} />
+          <Sel id="city"        label="City"             err={errors.city} />
+          <Sel id="product_cat" label="Product category" err={errors.product_cat} />
+          <NumInput id="distance_km" label="Distance (km)" placeholder="e.g. 4.7" step="0.1" min="0.1" />
         </div>
 
-        {/* ── Ratings & time ── */}
         <div className="section-label" style={{marginTop:20}}>Ratings & time</div>
         <div className="grid3">
-          <Field id="customer_rating" label="Customer rating (1–5)">
-            <input type="number" min="1" max="5" step="1"
-              value={form.customer_rating}
-              onChange={e=>set("customer_rating",e.target.value)}/>
-          </Field>
-          <Field id="partner_rating" label="Partner rating (1–5)">
-            <input type="number" min="1" max="5" step="1"
-              value={form.partner_rating}
-              onChange={e=>set("partner_rating",e.target.value)}/>
-          </Field>
-          <Field id="order_hour" label="Order hour (0–23)">
-            <input type="number" min="0" max="23" step="1"
-              value={form.order_hour}
-              onChange={e=>set("order_hour",e.target.value)}/>
-          </Field>
+          <NumInput id="customer_rating" label="Customer rating (1–5)" placeholder="3" min="1" max="5" defaultVal="3" />
+          <NumInput id="partner_rating"  label="Partner rating (1–5)"  placeholder="4" min="1" max="5" defaultVal="4" />
+          <NumInput id="order_hour"      label="Order hour (0–23)"     placeholder={String(now.getHours())} min="0" max="23" defaultVal={String(now.getHours())} />
         </div>
 
         <div className="div"/>
@@ -316,11 +322,11 @@ export default function DeliveryPredictor() {
               <div className="metric"><div className="mval">{result.upper}m</div><div className="mkey">Worst case</div></div>
             </div>
             <div className="tags">
-              <span className="tag">{form.company}</span>
-              <span className="tag">{form.city}</span>
-              <span className="tag">{form.product_cat}</span>
-              <span className="tag">{form.payment_method}</span>
-              {[8,9,12,13,18,19,20].includes(+form.order_hour) && <span className="tag">Peak hour</span>}
+              <span className="tag">{rf.company}</span>
+              <span className="tag">{rf.city}</span>
+              <span className="tag">{rf.product_cat}</span>
+              <span className="tag">{rf.payment_method}</span>
+              {[8,9,12,13,18,19,20].includes(+rf.order_hour) && <span className="tag">Peak hour</span>}
               {[0,6].includes(now.getDay()) && <span className="tag">Weekend</span>}
             </div>
           </div>
