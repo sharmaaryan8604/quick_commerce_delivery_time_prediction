@@ -1,5 +1,4 @@
 from pathlib import Path
-import json
 
 import joblib
 import pandas as pd
@@ -14,29 +13,10 @@ app = Flask(__name__)
 CORS(app)
 
 
-def load_json_metrics():
-    metrics_path = MODEL_DIR / "model_metrics.json"
-    if metrics_path.exists():
-        with open(metrics_path, "r", encoding="utf-8") as fh:
-            metrics = json.load(fh)
-            metrics.setdefault("deployed_model", metrics.get("best_model"))
-            return metrics
-
-    meta = joblib.load(MODEL_DIR / "model_meta.pkl")
-    return {
-        "best_model": meta.get("best_model"),
-        "deployed_model": meta.get("deployed_model", meta.get("best_model")),
-        "residual_std": float(meta.get("residual_std", 0)),
-        "generated_at": meta.get("generated_at"),
-        "models": json.loads(json.dumps(meta.get("evaluations", []), default=float)),
-    }
-
-
 print("Loading model artifacts...")
 model = joblib.load(MODEL_DIR / "best_model_pipeline.pkl")
 columns = joblib.load(MODEL_DIR / "model_columns.pkl")
 meta = joblib.load(MODEL_DIR / "model_meta.pkl")
-metrics = load_json_metrics()
 print("Model artifacts loaded.")
 
 
@@ -48,11 +28,6 @@ def home():
 @app.route("/api/health")
 def health():
     return jsonify({"status": "ok"})
-
-
-@app.route("/api/model-evaluations")
-def model_evaluations():
-    return jsonify(metrics)
 
 
 @app.route("/api/predict", methods=["POST"])

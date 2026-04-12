@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import warnings
 from datetime import datetime, timezone
 from pathlib import Path
@@ -262,16 +261,6 @@ def main():
         "evaluations": results_df.to_dict(orient="records"),
     }
     joblib.dump(meta, ARTIFACT_DIR / "model_meta.pkl")
-
-    metrics_payload = {
-        "best_model": best_model_name,
-        "deployed_model": best_model_name,
-        "residual_std": residual_std,
-        "generated_at": meta["generated_at"],
-        "models": results_df.to_dict(orient="records"),
-    }
-    with open(ARTIFACT_DIR / "model_metrics.json", "w", encoding="utf-8") as fh:
-        json.dump(metrics_payload, fh, indent=2)
 
     print(f"\nSaved best_model_pipeline.pkl to {ARTIFACT_DIR}")
 

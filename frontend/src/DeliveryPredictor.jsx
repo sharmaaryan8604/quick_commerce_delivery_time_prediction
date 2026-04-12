@@ -164,7 +164,7 @@ h1 em {
 }
 
 .sel::after {
-  content: "â–¾";
+  content: "v";
   position: absolute;
   right: 13px;
   top: 50%;
@@ -633,7 +633,6 @@ export default function DeliveryPredictor() {
             {id === "payment_method" && PAYMENTS.map((item) => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
-        )}
       </div>
     );
   }
@@ -708,7 +707,7 @@ export default function DeliveryPredictor() {
               <span>min</span>
             </div>
             <div className="rrange">
-              Confidence range: <strong>{result.lower}-{result.upper} min</strong> · {result.confidence}% confidence
+              Confidence range: <strong>{result.lower}-{result.upper} min</strong> | {result.confidence}% confidence
             </div>
             <div className="metrics">
               <div className="metric">
@@ -739,6 +738,3 @@ export default function DeliveryPredictor() {
     </div>
   );
 }
-
-
-
