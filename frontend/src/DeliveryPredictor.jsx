@@ -1,6 +1,6 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 
-const API_BASE = process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:5000";
+const API_BASE = process.env.REACT_APP_API_BASE_URL || "https://quick-commerce-delivery-time-prediction-4.onrender.com";
 
 const fontLink = document.createElement("link");
 fontLink.rel = "stylesheet";
@@ -487,7 +487,7 @@ function validate(form) {
 
 export default function DeliveryPredictor() {
   const now = new Date();
-  const formRef = useRef({
+  const [form, setForm] = useState({
     order_value: "",
     distance_km: "",
     items_count: "",
@@ -505,12 +505,6 @@ export default function DeliveryPredictor() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [apiErr, setApiErr] = useState("");
-  const [selects, setSelects] = useState({
-    company: "",
-    city: "",
-    product_cat: "",
-    payment_method: "",
-  });
 
   function clearFieldError(fieldName) {
     setErrors((current) => {
@@ -522,22 +516,20 @@ export default function DeliveryPredictor() {
   }
 
   function handleInputChange(fieldName, value) {
-    formRef.current[fieldName] = value;
+    setForm((current) => ({ ...current, [fieldName]: value }));
     clearFieldError(fieldName);
     setResult(null);
     setApiErr("");
   }
 
   function handleSelectChange(fieldName, value) {
-    formRef.current[fieldName] = value;
-    setSelects((current) => ({ ...current, [fieldName]: value }));
+    setForm((current) => ({ ...current, [fieldName]: value }));
     clearFieldError(fieldName);
     setResult(null);
     setApiErr("");
   }
 
   async function handleSubmit() {
-    const form = formRef.current;
     const nextErrors = validate(form);
     if (Object.keys(nextErrors).length) {
       setErrors(nextErrors);
@@ -623,9 +615,9 @@ export default function DeliveryPredictor() {
   function SelectField({ id, label, error }) {
     return (
       <div className="field">
-        <label>{label}</label>
+        <label htmlFor={id}>{label}</label>
         <div className="sel">
-          <select value={selects[id]} className={error ? "err" : ""} onChange={(event) => handleSelectChange(id, event.target.value)}>
+          <select id={id} value={form[id]} className={error ? "err" : ""} onChange={(event) => handleSelectChange(id, event.target.value)}>
             <option value="">Select...</option>
             {id === "company" && COMPANIES.map((item) => <option key={item} value={item}>{item}</option>)}
             {id === "city" && CITIES.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -637,15 +629,16 @@ export default function DeliveryPredictor() {
     );
   }
 
-  function NumberField({ id, label, placeholder, span, defaultValue }) {
+  function NumberField({ id, label, placeholder, span }) {
     return (
       <Field span={span}>
-        <label>{label}</label>
+        <label htmlFor={id}>{label}</label>
         <input
+          id={id}
           type="text"
           inputMode="decimal"
           placeholder={placeholder}
-          defaultValue={defaultValue ?? formRef.current[id]}
+          value={form[id]}
           className={errors[id] ? "err" : ""}
           onChange={(event) => handleInputChange(id, event.target.value)}
         />
@@ -671,7 +664,7 @@ export default function DeliveryPredictor() {
         <div className="grid2">
           <NumberField id="order_value" label="Order value (Rs)" placeholder="e.g. 702" />
           <NumberField id="items_count" label="Item count" placeholder="e.g. 12" />
-          <NumberField id="discount_amount" label="Discount amount (Rs)" placeholder="0" defaultValue="0" />
+          <NumberField id="discount_amount" label="Discount amount (Rs)" placeholder="0" />
           <SelectField id="payment_method" label="Payment method" error={errors.payment_method} />
         </div>
 
@@ -685,9 +678,9 @@ export default function DeliveryPredictor() {
 
         <div className="section-label">Ratings and time</div>
         <div className="grid3">
-          <NumberField id="customer_rating" label="Customer rating (1-5)" placeholder="3" defaultValue="3" />
-          <NumberField id="partner_rating" label="Partner rating (1-5)" placeholder="4" defaultValue="4" />
-          <NumberField id="order_hour" label="Order hour (0-23)" placeholder={String(now.getHours())} defaultValue={String(now.getHours())} />
+          <NumberField id="customer_rating" label="Customer rating (1-5)" placeholder="3" />
+          <NumberField id="partner_rating" label="Partner rating (1-5)" placeholder="4" />
+          <NumberField id="order_hour" label="Order hour (0-23)" placeholder={String(now.getHours())} />
         </div>
 
         <div className="divider" />
