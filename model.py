@@ -1,288 +1,280 @@
-# ==========================================================
-# QUICK COMMERCE DELIVERY TIME PREDICTION (IMPROVED)
-# Author: Aryan Sharma
-# Improvements: No data leakage, Pipeline, Better hyperparams,
-#               Feature engineering, LightGBM added
-# ==========================================================
+from __future__ import annotations
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import time
+import json
 import warnings
-warnings.filterwarnings("ignore")
+from datetime import datetime, timezone
+from pathlib import Path
 
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.linear_model import LinearRegression
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-from sklearn.preprocessing import OrdinalEncoder
+import joblib
+import lightgbm as lgb
+import numpy as np
+import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
 from sklearn.metrics import (
     mean_absolute_error,
+    mean_absolute_percentage_error,
     mean_squared_error,
     r2_score,
-    mean_absolute_percentage_error
 )
+from sklearn.model_selection import cross_val_score, train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OrdinalEncoder
 from xgboost import XGBRegressor
-import lightgbm as lgb
-import joblib
 
-# ==========================================================
-# STEP 1: LOAD DATA
-# ==========================================================
+warnings.filterwarnings("ignore")
 
-print("Loading dataset...")
-df = pd.read_csv("quick_commerce_data_modified_cleaned.csv")
-df.columns = df.columns.str.strip().str.lower()
+try:
+    import matplotlib
 
-print("Dataset shape:", df.shape)
-print("Columns:", df.columns.tolist())
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
-# ==========================================================
-# STEP 2: FEATURE ENGINEERING
-# ==========================================================
+    HAS_MATPLOTLIB = True
+except ImportError:
+    plt = None
+    HAS_MATPLOTLIB = False
 
-# Timestamp-based features (if column exists)
-if "order_time" in df.columns:
-    df["order_time"] = pd.to_datetime(df["order_time"], errors="coerce")
-    df["hour_of_day"]  = df["order_time"].dt.hour
-    df["is_weekend"]   = df["order_time"].dt.dayofweek.isin([5, 6]).astype(int)
-    df["is_peak_hour"] = df["hour_of_day"].isin([8,9,12,13,18,19,20]).astype(int)
-    df.drop(columns=["order_time"], inplace=True)
 
-# Ratio feature (if both columns exist)
-if "distance_km" in df.columns and "item_count" in df.columns:
-    df["distance_per_item"] = df["distance_km"] / (df["item_count"] + 1)
+ROOT = Path(__file__).resolve().parent
+DATA_PATH = ROOT / "quick_commerce_data_modified_cleaned.csv"
+ARTIFACT_DIR = ROOT / "backend" / "models"
+ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
 
-print("Shape after feature engineering:", df.shape)
 
-# ==========================================================
-# STEP 3: DEFINE FEATURES AND TARGET
-# ==========================================================
+def load_dataset() -> pd.DataFrame:
+    df = pd.read_csv(DATA_PATH)
+    df.columns = df.columns.str.strip().str.lower()
 
-target = "delivery_time_min"
-drop_cols = [target, "order_id"] if "order_id" in df.columns else [target]
+    if "order_time" in df.columns:
+        df["order_time"] = pd.to_datetime(df["order_time"], errors="coerce")
+        df["hour_of_day"] = df["order_time"].dt.hour
+        df["is_weekend"] = df["order_time"].dt.dayofweek.isin([5, 6]).astype(int)
+        df["is_peak_hour"] = df["hour_of_day"].isin([8, 9, 12, 13, 18, 19, 20]).astype(int)
+        df = df.drop(columns=["order_time"])
 
-X = df.drop(columns=drop_cols)
-y = df[target]
+    if "distance_km" in df.columns and "item_count" in df.columns:
+        df["distance_per_item"] = df["distance_km"] / (df["item_count"] + 1)
 
-cat_cols = X.select_dtypes(include="object").columns.tolist()
-num_cols = X.select_dtypes(exclude="object").columns.tolist()
+    return df
 
-print(f"Categorical features: {cat_cols}")
-print(f"Numerical features  : {num_cols}")
 
-# ==========================================================
-# STEP 4: TRAIN / TEST SPLIT  (before any fitting)
-# ==========================================================
+def build_preprocessor(x_train: pd.DataFrame) -> tuple[ColumnTransformer, list[str], list[str]]:
+    cat_cols = x_train.select_dtypes(include="object").columns.tolist()
+    num_cols = x_train.select_dtypes(exclude="object").columns.tolist()
 
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ("cat", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), cat_cols),
+            ("num", "passthrough", num_cols),
+        ]
+    )
 
-print("Train shape:", X_train.shape)
-print("Test  shape:", X_test.shape)
+    return preprocessor, cat_cols, num_cols
 
-# ==========================================================
-# STEP 5: PREPROCESSOR (fitted only on train — no leakage)
-# ==========================================================
 
-preprocessor = ColumnTransformer(transformers=[
-    ("cat", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1), cat_cols),
-    ("num", "passthrough", num_cols)
-])
+def evaluate_model(name, pipeline, x_train, y_train, x_test, y_test):
+    pred = pipeline.predict(x_test)
 
-# ==========================================================
-# STEP 6: EVALUATION HELPER
-# ==========================================================
+    mae = mean_absolute_error(y_test, pred)
+    rmse = np.sqrt(mean_squared_error(y_test, pred))
+    r2 = r2_score(y_test, pred)
+    mape = mean_absolute_percentage_error(y_test, pred) * 100
 
-results = []
-
-def evaluate_model(name, pipeline, X_tr, y_tr, X_te, y_te):
-    pred = pipeline.predict(X_te)
-
-    mae  = mean_absolute_error(y_te, pred)
-    rmse = np.sqrt(mean_squared_error(y_te, pred))
-    r2   = r2_score(y_te, pred)
-    mape = mean_absolute_percentage_error(y_te, pred) * 100
-
-    cv   = cross_val_score(pipeline, X_tr, y_tr,
-                           scoring="neg_mean_squared_error", cv=3, n_jobs=-1)
+    cv = cross_val_score(
+        pipeline,
+        x_train,
+        y_train,
+        scoring="neg_mean_squared_error",
+        cv=3,
+        n_jobs=1,
+    )
     cv_rmse = np.sqrt(-cv.mean())
 
+    train_pred = pipeline.predict(x_train)
+    train_rmse = np.sqrt(mean_squared_error(y_train, train_pred))
+
     print(f"\n========== {name} ==========")
-    print(f"MAE     : {mae:.2f}")
-    print(f"RMSE    : {rmse:.2f}")
-    print(f"R²      : {r2:.4f}")
-    print(f"MAPE    : {mape:.2f}%")
-    print(f"CV-RMSE : {cv_rmse:.2f}")
+    print(f"MAE      : {mae:.2f}")
+    print(f"RMSE     : {rmse:.2f}")
+    print(f"R^2      : {r2:.4f}")
+    print(f"MAPE     : {mape:.2f}%")
+    print(f"CV-RMSE  : {cv_rmse:.2f}")
+    print(f"Train RMSE: {train_rmse:.2f} | Test RMSE: {rmse:.2f} | Gap: {rmse - train_rmse:.2f}")
 
-    # Overfitting gap
-    train_pred  = pipeline.predict(X_tr)
-    train_rmse  = np.sqrt(mean_squared_error(y_tr, train_pred))
-    print(f"Train RMSE: {train_rmse:.2f}  |  Test RMSE: {rmse:.2f}  |  Gap: {rmse - train_rmse:.2f}")
+    return {
+        "Model": name,
+        "MAE": float(mae),
+        "RMSE": float(rmse),
+        "R2": float(r2),
+        "MAPE": float(mape),
+        "CV_RMSE": float(cv_rmse),
+    }
 
-    results.append({
-        "Model": name, "MAE": mae, "RMSE": rmse,
-        "R2": r2, "MAPE": mape, "CV_RMSE": cv_rmse
-    })
-    return pred
 
-# ==========================================================
-# STEP 7: TRAIN MODELS
-# ==========================================================
+def main():
+    print("Loading dataset...")
+    df = load_dataset()
+    print("Dataset shape:", df.shape)
+    print("Columns:", df.columns.tolist())
 
-# --- Linear Regression ---
-start = time.time()
-lr_pipe = Pipeline([("pre", preprocessor), ("model", LinearRegression())])
-lr_pipe.fit(X_train, y_train)
-print(f"\nLinear Regression time: {(time.time()-start)/60:.2f} min")
-evaluate_model("Linear Regression", lr_pipe, X_train, y_train, X_test, y_test)
+    target = "delivery_time_min"
+    drop_cols = [target, "order_id"] if "order_id" in df.columns else [target]
+    x = df.drop(columns=drop_cols)
+    y = df[target]
 
-# --- Random Forest ---
-start = time.time()
-rf_pipe = Pipeline([
-    ("pre", preprocessor),
-    ("model", RandomForestRegressor(
-        n_estimators=150, max_depth=12,
-        min_samples_split=4, random_state=42, n_jobs=-1
-    ))
-])
-rf_pipe.fit(X_train, y_train)
-print(f"\nRandom Forest time: {(time.time()-start)/60:.2f} min")
-evaluate_model("Random Forest", rf_pipe, X_train, y_train, X_test, y_test)
+    x_train, x_test, y_train, y_test = train_test_split(x, y, test_size=0.2, random_state=42)
 
-# --- XGBoost (improved params) ---
-start = time.time()
-xgb_pipe = Pipeline([
-    ("pre", preprocessor),
-    ("model", XGBRegressor(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        tree_method="hist",
-        n_jobs=-1,
-        verbosity=0
-    ))
-])
-xgb_pipe.fit(X_train, y_train)
-print(f"\nXGBoost time: {(time.time()-start)/60:.2f} min")
-pred_xgb = evaluate_model("XGBoost", xgb_pipe, X_train, y_train, X_test, y_test)
+    print("Train shape:", x_train.shape)
+    print("Test shape :", x_test.shape)
 
-# --- LightGBM ---
-start = time.time()
-lgb_pipe = Pipeline([
-    ("pre", preprocessor),
-    ("model", lgb.LGBMRegressor(
-        n_estimators=300,
-        max_depth=6,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        reg_alpha=0.1,
-        reg_lambda=1.0,
-        n_jobs=-1,
-        verbose=-1
-    ))
-])
-lgb_pipe.fit(X_train, y_train)
-print(f"\nLightGBM time: {(time.time()-start)/60:.2f} min")
-pred_lgb = evaluate_model("LightGBM", lgb_pipe, X_train, y_train, X_test, y_test)
+    preprocessor, cat_cols, num_cols = build_preprocessor(x_train)
+    results = []
 
-# ==========================================================
-# STEP 8: MODEL COMPARISON
-# ==========================================================
+    lr_pipe = Pipeline([("pre", preprocessor), ("model", LinearRegression())])
+    lr_pipe.fit(x_train, y_train)
+    results.append(evaluate_model("Linear Regression", lr_pipe, x_train, y_train, x_test, y_test))
 
-results_df = pd.DataFrame(results).sort_values("RMSE")
-print("\n================ MODEL COMPARISON ================")
-print(results_df.to_string(index=False))
+    rf_pipe = Pipeline(
+        [
+            ("pre", preprocessor),
+            (
+                "model",
+                RandomForestRegressor(
+                    n_estimators=150,
+                    max_depth=12,
+                    min_samples_split=4,
+                    random_state=42,
+                    n_jobs=1,
+                ),
+            ),
+        ]
+    )
+    rf_pipe.fit(x_train, y_train)
+    results.append(evaluate_model("Random Forest", rf_pipe, x_train, y_train, x_test, y_test))
 
-best_model_name = results_df.iloc[0]["Model"]
-print(f"\nBest model: {best_model_name}")
+    xgb_pipe = Pipeline(
+        [
+            ("pre", preprocessor),
+            (
+                "model",
+                XGBRegressor(
+                    n_estimators=300,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    reg_alpha=0.1,
+                    reg_lambda=1.0,
+                    tree_method="hist",
+                    n_jobs=1,
+                    verbosity=0,
+                ),
+            ),
+        ]
+    )
+    xgb_pipe.fit(x_train, y_train)
+    results.append(evaluate_model("XGBoost", xgb_pipe, x_train, y_train, x_test, y_test))
 
-# Pick best pipeline
-best_pipe = {
-    "Linear Regression": lr_pipe,
-    "Random Forest":     rf_pipe,
-    "XGBoost":           xgb_pipe,
-    "LightGBM":          lgb_pipe,
-}[best_model_name]
+    lgb_pipe = Pipeline(
+        [
+            ("pre", preprocessor),
+            (
+                "model",
+                lgb.LGBMRegressor(
+                    n_estimators=300,
+                    max_depth=6,
+                    learning_rate=0.05,
+                    subsample=0.8,
+                    colsample_bytree=0.8,
+                    reg_alpha=0.1,
+                    reg_lambda=1.0,
+                    n_jobs=1,
+                    verbose=-1,
+                ),
+            ),
+        ]
+    )
+    lgb_pipe.fit(x_train, y_train)
+    results.append(evaluate_model("LightGBM", lgb_pipe, x_train, y_train, x_test, y_test))
 
-# ==========================================================
-# STEP 9: RESIDUAL ANALYSIS (best model)
-# ==========================================================
+    results_df = pd.DataFrame(results).sort_values("RMSE")
+    print("\n================ MODEL COMPARISON ================")
+    print(results_df.to_string(index=False))
 
-best_pred = best_pipe.predict(X_test)
-residuals = y_test - best_pred
+    best_model_name = results_df.iloc[0]["Model"]
+    print(f"\nBest model: {best_model_name}")
 
-plt.figure(figsize=(8, 5))
-plt.hist(residuals, bins=40, edgecolor="white")
-plt.title(f"Residual Distribution — {best_model_name}")
-plt.xlabel("Residual (min)")
-plt.ylabel("Frequency")
-plt.tight_layout()
-plt.savefig("residuals.png", dpi=150)
-plt.show()
+    model_lookup = {
+        "Linear Regression": lr_pipe,
+        "Random Forest": rf_pipe,
+        "XGBoost": xgb_pipe,
+        "LightGBM": lgb_pipe,
+    }
+    best_pipe = model_lookup[best_model_name]
 
-# ==========================================================
-# STEP 10: FEATURE IMPORTANCE (XGBoost)
-# ==========================================================
+    best_pred = best_pipe.predict(x_test)
+    residuals = y_test - best_pred
+    residual_std = float(residuals.std())
 
-xgb_model = xgb_pipe.named_steps["model"]
-feature_names = (
-    cat_cols +
-    num_cols
-)
+    if HAS_MATPLOTLIB:
+        plt.figure(figsize=(8, 5))
+        plt.hist(residuals, bins=40, edgecolor="white")
+        plt.title(f"Residual Distribution - {best_model_name}")
+        plt.xlabel("Residual (min)")
+        plt.ylabel("Frequency")
+        plt.tight_layout()
+        plt.savefig(ARTIFACT_DIR / "residuals.png", dpi=150)
+        plt.close()
 
-importance = pd.DataFrame({
-    "Feature":    feature_names,
-    "Importance": xgb_model.feature_importances_
-}).sort_values("Importance", ascending=False)
+    xgb_model = xgb_pipe.named_steps["model"]
+    importance = pd.DataFrame(
+        {
+            "Feature": cat_cols + num_cols,
+            "Importance": xgb_model.feature_importances_,
+        }
+    ).sort_values("Importance", ascending=False)
 
-plt.figure(figsize=(8, 6))
-plt.barh(importance["Feature"][:10], importance["Importance"][:10])
-plt.gca().invert_yaxis()
-plt.title("Top 10 Features — XGBoost")
-plt.tight_layout()
-plt.savefig("feature_importance.png", dpi=150)
-plt.show()
+    if HAS_MATPLOTLIB:
+        plt.figure(figsize=(8, 6))
+        plt.barh(importance["Feature"][:10], importance["Importance"][:10])
+        plt.gca().invert_yaxis()
+        plt.title("Top 10 Features - XGBoost")
+        plt.tight_layout()
+        plt.savefig(ARTIFACT_DIR / "feature_importance.png", dpi=150)
+        plt.close()
 
-print("\nTop 10 Features:")
-print(importance.head(10).to_string(index=False))
+    print("\nTop 10 Features:")
+    print(importance.head(10).to_string(index=False))
+    print(f"\nPrediction interval (+/- 1 sigma): +/-{residual_std:.2f} minutes")
 
-# ==========================================================
-# STEP 11: PREDICTION INTERVAL (±1 std of residuals)
-# ==========================================================
+    joblib.dump(best_pipe, ARTIFACT_DIR / "best_model_pipeline.pkl", compress=3)
+    joblib.dump(xgb_pipe, ARTIFACT_DIR / "xgb_pipeline.pkl", compress=3)
+    joblib.dump(lgb_pipe, ARTIFACT_DIR / "lgb_pipeline.pkl", compress=3)
+    joblib.dump(x_train.columns.tolist(), ARTIFACT_DIR / "model_columns.pkl")
 
-residual_std = residuals.std()
-print(f"\nPrediction interval (±1σ): ±{residual_std:.2f} minutes")
-print("Use this in your API response as confidence range.")
+    meta = {
+        "residual_std": residual_std,
+        "best_model": best_model_name,
+        "deployed_model": best_model_name,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "evaluations": results_df.to_dict(orient="records"),
+    }
+    joblib.dump(meta, ARTIFACT_DIR / "model_meta.pkl")
 
-# ==========================================================
-# STEP 12: SAVE ARTIFACTS
-# ==========================================================
+    metrics_payload = {
+        "best_model": best_model_name,
+        "deployed_model": best_model_name,
+        "residual_std": residual_std,
+        "generated_at": meta["generated_at"],
+        "models": results_df.to_dict(orient="records"),
+    }
+    with open(ARTIFACT_DIR / "model_metrics.json", "w", encoding="utf-8") as fh:
+        json.dump(metrics_payload, fh, indent=2)
 
-joblib.dump(best_pipe,          "best_model_pipeline.pkl", compress=3)
-joblib.dump(xgb_pipe,           "xgb_pipeline.pkl",        compress=3)
-joblib.dump(lgb_pipe,           "lgb_pipeline.pkl",        compress=3)
-joblib.dump(X_train.columns.tolist(), "model_columns.pkl")
-joblib.dump({"residual_std": residual_std}, "model_meta.pkl")
+    print(f"\nSaved best_model_pipeline.pkl to {ARTIFACT_DIR}")
 
-import os
-print(f"\nSaved best_model_pipeline.pkl — {os.path.getsize('best_model_pipeline.pkl')/1024:.1f} KB")
 
-# ==========================================================
-# STEP 13: BUSINESS INSIGHTS
-# ==========================================================
-
-print("\nBusiness Insights:")
-print("• Feature engineering (hour_of_day, is_peak_hour) improves time-aware predictions.")
-print("• distance_per_item captures load-adjusted distance — strong predictor.")
-print("• LightGBM often matches XGBoost at lower memory usage.")
-print("• Prediction interval exposed via API gives users realistic ETA ranges.")
-print("• Pipeline ensures zero data leakage between train and test sets.")
+if __name__ == "__main__":
+    main()
