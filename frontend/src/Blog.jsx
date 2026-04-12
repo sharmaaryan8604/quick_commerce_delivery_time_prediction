@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import staticMetrics from "./modelMetricsData";
 
 const API_BASE = process.env.REACT_APP_API_BASE_URL || "http://127.0.0.1:5000";
 
@@ -313,14 +314,15 @@ function fmt(value, digits = 3) {
 }
 
 export default function Blog({ onOpenPredictor }) {
-  const [metrics, setMetrics] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [metrics, setMetrics] = useState(staticMetrics);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
 
     async function loadMetrics() {
+      setLoading(true);
       try {
         const response = await fetch(`${API_BASE}/api/model-evaluations`, { signal: controller.signal });
         if (!response.ok) {
@@ -329,7 +331,7 @@ export default function Blog({ onOpenPredictor }) {
         const data = await response.json();
         setMetrics(data);
       } catch (fetchError) {
-        if (fetchError.name !== "AbortError") {
+        if (fetchError.name !== "AbortError" && !staticMetrics?.models?.length) {
           setError("Model evaluation data is unavailable right now.");
         }
       } finally {
@@ -413,7 +415,7 @@ export default function Blog({ onOpenPredictor }) {
             </div>
 
             {error && <div className="empty-state">{error}</div>}
-            {!error && loading && <div className="loader">Loading model evaluations...</div>}
+            {!error && loading && <div className="loader">Refreshing model evaluations...</div>}
 
             {!error && !loading && ordered.length === 0 && <div className="empty-state">No model comparison data is available yet.</div>}
 

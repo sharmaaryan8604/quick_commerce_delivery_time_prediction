@@ -610,7 +610,7 @@ export default function DeliveryPredictor() {
         payload,
         form: { ...form },
       });
-      setApiErr(error.message || "Prediction service unavailable. Showing a local estimate instead.");
+      setApiErr("Using a local estimate because the backend is not reachable in this deployment.");
     } finally {
       setLoading(false);
     }
@@ -739,5 +739,6 @@ export default function DeliveryPredictor() {
     </div>
   );
 }
+
 
 
