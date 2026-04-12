@@ -485,6 +485,41 @@ function validate(form) {
   return errors;
 }
 
+function Field({ children, span }) {
+  return <div className={span ? "field s2" : "field"}>{children}</div>;
+}
+
+function SelectField({ id, label, error, value, options, onChange }) {
+  return (
+    <div className="field">
+      <label htmlFor={id}>{label}</label>
+      <div className="sel">
+        <select id={id} value={value} className={error ? "err" : ""} onChange={(event) => onChange(id, event.target.value)}>
+          <option value="">Select...</option>
+          {options.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+      </div>
+    </div>
+  );
+}
+
+function NumberField({ id, label, placeholder, span, value, error, onChange }) {
+  return (
+    <Field span={span}>
+      <label htmlFor={id}>{label}</label>
+      <input
+        id={id}
+        type="text"
+        inputMode="decimal"
+        placeholder={placeholder}
+        value={value}
+        className={error ? "err" : ""}
+        onChange={(event) => onChange(id, event.target.value)}
+      />
+    </Field>
+  );
+}
+
 export default function DeliveryPredictor() {
   const now = new Date();
   const [form, setForm] = useState({
@@ -608,44 +643,6 @@ export default function DeliveryPredictor() {
     }
   }
 
-  function Field({ children, span }) {
-    return <div className={span ? "field s2" : "field"}>{children}</div>;
-  }
-
-  function SelectField({ id, label, error }) {
-    return (
-      <div className="field">
-        <label htmlFor={id}>{label}</label>
-        <div className="sel">
-          <select id={id} value={form[id]} className={error ? "err" : ""} onChange={(event) => handleSelectChange(id, event.target.value)}>
-            <option value="">Select...</option>
-            {id === "company" && COMPANIES.map((item) => <option key={item} value={item}>{item}</option>)}
-            {id === "city" && CITIES.map((item) => <option key={item} value={item}>{item}</option>)}
-            {id === "product_cat" && PRODUCTS.map((item) => <option key={item} value={item}>{item}</option>)}
-            {id === "payment_method" && PAYMENTS.map((item) => <option key={item} value={item}>{item}</option>)}
-          </select>
-        </div>
-      </div>
-    );
-  }
-
-  function NumberField({ id, label, placeholder, span }) {
-    return (
-      <Field span={span}>
-        <label htmlFor={id}>{label}</label>
-        <input
-          id={id}
-          type="text"
-          inputMode="decimal"
-          placeholder={placeholder}
-          value={form[id]}
-          className={errors[id] ? "err" : ""}
-          onChange={(event) => handleInputChange(id, event.target.value)}
-        />
-      </Field>
-    );
-  }
-
   const selected = result?.form || {};
 
   return (
@@ -662,25 +659,25 @@ export default function DeliveryPredictor() {
       <div className="card">
         <div className="section-label">Order details</div>
         <div className="grid2">
-          <NumberField id="order_value" label="Order value (Rs)" placeholder="e.g. 702" />
-          <NumberField id="items_count" label="Item count" placeholder="e.g. 12" />
-          <NumberField id="discount_amount" label="Discount amount (Rs)" placeholder="0" />
-          <SelectField id="payment_method" label="Payment method" error={errors.payment_method} />
+          <NumberField id="order_value" label="Order value (Rs)" placeholder="e.g. 702" value={form.order_value} error={errors.order_value} onChange={handleInputChange} />
+          <NumberField id="items_count" label="Item count" placeholder="e.g. 12" value={form.items_count} error={errors.items_count} onChange={handleInputChange} />
+          <NumberField id="discount_amount" label="Discount amount (Rs)" placeholder="0" value={form.discount_amount} error={errors.discount_amount} onChange={handleInputChange} />
+          <SelectField id="payment_method" label="Payment method" error={errors.payment_method} value={form.payment_method} options={PAYMENTS} onChange={handleSelectChange} />
         </div>
 
         <div className="section-label">Platform and location</div>
         <div className="grid2">
-          <SelectField id="company" label="Company" error={errors.company} />
-          <SelectField id="city" label="City" error={errors.city} />
-          <SelectField id="product_cat" label="Product category" error={errors.product_cat} />
-          <NumberField id="distance_km" label="Distance (km)" placeholder="e.g. 4.7" />
+          <SelectField id="company" label="Company" error={errors.company} value={form.company} options={COMPANIES} onChange={handleSelectChange} />
+          <SelectField id="city" label="City" error={errors.city} value={form.city} options={CITIES} onChange={handleSelectChange} />
+          <SelectField id="product_cat" label="Product category" error={errors.product_cat} value={form.product_cat} options={PRODUCTS} onChange={handleSelectChange} />
+          <NumberField id="distance_km" label="Distance (km)" placeholder="e.g. 4.7" value={form.distance_km} error={errors.distance_km} onChange={handleInputChange} />
         </div>
 
         <div className="section-label">Ratings and time</div>
         <div className="grid3">
-          <NumberField id="customer_rating" label="Customer rating (1-5)" placeholder="3" />
-          <NumberField id="partner_rating" label="Partner rating (1-5)" placeholder="4" />
-          <NumberField id="order_hour" label="Order hour (0-23)" placeholder={String(now.getHours())} />
+          <NumberField id="customer_rating" label="Customer rating (1-5)" placeholder="3" value={form.customer_rating} error={errors.customer_rating} onChange={handleInputChange} />
+          <NumberField id="partner_rating" label="Partner rating (1-5)" placeholder="4" value={form.partner_rating} error={errors.partner_rating} onChange={handleInputChange} />
+          <NumberField id="order_hour" label="Order hour (0-23)" placeholder={String(now.getHours())} value={form.order_hour} error={errors.order_hour} onChange={handleInputChange} />
         </div>
 
         <div className="divider" />

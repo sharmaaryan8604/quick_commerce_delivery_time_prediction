@@ -8,6 +8,19 @@ test('renders the delivery predictor home screen', () => {
   expect(screen.getByRole('button', { name: /predict delivery time/i })).toBeInTheDocument();
 });
 
+test('keeps focus on a number input while typing', async () => {
+  render(<App />);
+
+  const orderValueInput = screen.getByLabelText(/order value/i);
+  orderValueInput.focus();
+  expect(orderValueInput).toHaveFocus();
+
+  await userEvent.type(orderValueInput, '7');
+
+  expect(screen.getByLabelText(/order value/i)).toHaveValue('7');
+  expect(screen.getByLabelText(/order value/i)).toHaveFocus();
+});
+
 test('keeps edited rating values after showing a prediction', async () => {
   const originalFetch = global.fetch;
 
