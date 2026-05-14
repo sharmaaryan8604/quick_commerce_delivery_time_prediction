@@ -50,14 +50,13 @@ Vercel
 ## Demo
 
 Live UI:
-(Add Vercel link here)
+https://quick-commerce-delivery-time-predic.vercel.app/
 
-API endpoint:
-(Add Render link here)
+API endpoint:https://quick-commerce-delivery-time-prediction-4.onrender.com
+
 
 ---
 
 ## Author
 
 Aryan Sharma
-NSUT — Artificial Intelligence and Machine Learning
